@@ -59,6 +59,24 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define LED_Pin GPIO_PIN_13
+#define LED_GPIO_Port GPIOC
+#define BAT_V_ADC_Pin GPIO_PIN_0
+#define BAT_V_ADC_GPIO_Port GPIOA
+#define TRIG_EXTI_4_Pin GPIO_PIN_4
+#define TRIG_EXTI_4_GPIO_Port GPIOA
+#define TRIG_EXTI_4_EXTI_IRQn EXTI4_IRQn
+#define END_SW_EXTI_5_Pin GPIO_PIN_5
+#define END_SW_EXTI_5_GPIO_Port GPIOA
+#define END_SW_EXTI_5_EXTI_IRQn EXTI9_5_IRQn
+#define SPD_WHL_PWM_CH1_Pin GPIO_PIN_8
+#define SPD_WHL_PWM_CH1_GPIO_Port GPIOA
+#define TRIG_MOT_PWM_CH2_Pin GPIO_PIN_9
+#define TRIG_MOT_PWM_CH2_GPIO_Port GPIOA
+#define TRIG_MOT_B_Pin GPIO_PIN_11
+#define TRIG_MOT_B_GPIO_Port GPIOA
+#define TRIG_MOT_A_Pin GPIO_PIN_12
+#define TRIG_MOT_A_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

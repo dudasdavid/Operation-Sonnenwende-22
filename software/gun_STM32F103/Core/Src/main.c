@@ -25,6 +25,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include "ssd1306.h"
+#include "ssd1306_fonts.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -80,6 +82,18 @@ const osThreadAttr_t TaskOne_attributes = {
   .stack_size = sizeof(myTask02Buffer),
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for displayTask */
+osThreadId_t displayTaskHandle;
+uint32_t myTask03Buffer[ 128 ];
+osStaticThreadDef_t myTask03ControlBlock;
+const osThreadAttr_t displayTask_attributes = {
+  .name = "displayTask",
+  .cb_mem = &myTask03ControlBlock,
+  .cb_size = sizeof(myTask03ControlBlock),
+  .stack_mem = &myTask03Buffer[0],
+  .stack_size = sizeof(myTask03Buffer),
+  .priority = (osPriority_t) osPriorityLow,
+};
 /* USER CODE BEGIN PV */
 uint8_t rxBuffer[RX_BUFFER_SIZE];
 uint8_t txBuffer[TX_BUFFER_SIZE];
@@ -98,7 +112,7 @@ static volatile uint32_t button_debounce = 150;
 static volatile uint32_t ADC_Buf[4];
 static volatile uint32_t ADC_Values[4];
 
-static volatile uint32_t battery_voltage = 0;
+static volatile float battery_voltage = 0;
 
 static volatile uint8_t firing_sequence_start = 0;
 static volatile uint32_t trigger_start_timestamp = 0;
@@ -109,6 +123,8 @@ volatile uint32_t speed_up_threshold = 1600;
 
 static volatile uint32_t sequence_time = 0;
 static volatile uint32_t distance = 9999;
+static uint8_t ammo_counter = 20;
+volatile bool no_mag_flag = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -122,6 +138,7 @@ static void MX_I2C1_Init(void);
 static void MX_USART3_UART_Init(void);
 void StartDefaultTask(void *argument);
 void StartTaskOne(void *argument);
+void StartDisplayTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -206,6 +223,9 @@ int main(void)
 
   /* creation of TaskOne */
   TaskOneHandle = osThreadNew(StartTaskOne, NULL, &TaskOne_attributes);
+
+  /* creation of displayTask */
+  displayTaskHandle = osThreadNew(StartDisplayTask, NULL, &displayTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -687,7 +707,7 @@ void StartDefaultTask(void *argument)
     	}
     }
     //HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-    battery_voltage = ADC_Values[0] / 41;
+    battery_voltage = ADC_Values[0] / 410.0;
     HAL_ADC_Start_DMA(&hadc1, (uint32_t*)ADC_Buf,4);
 	if ( sequence_time > speed_up_threshold) {
 		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -715,6 +735,16 @@ void StartDefaultTask(void *argument)
             if (mmPtr != NULL) {
                 *mmPtr = '\0'; // cut off at "mm"
                 distance = atoi((char*)rxBuffer); // convert number part
+
+                if (distance > 8) {
+                	ammo_counter = 0;
+                }
+
+                if (distance > 30) {
+                	no_mag_flag = true;
+                }
+
+
             } else {
                 distance = 9999;
             }
@@ -813,6 +843,66 @@ void StartTaskOne(void *argument)
     osDelay(100);
   }
   /* USER CODE END StartTaskOne */
+}
+
+/* USER CODE BEGIN Header_StartDisplayTask */
+/**
+* @brief Function implementing the displayTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartDisplayTask */
+void StartDisplayTask(void *argument)
+{
+  /* USER CODE BEGIN StartDisplayTask */
+
+	  ssd1306_Init();
+
+	  char str[16];
+	  int int_part = 0;
+	  int frac_part = 0;
+
+	  ssd1306_Fill(Black);
+	  ssd1306_SetCursor(20, 30);
+	  ssd1306_WriteString("Welcome!", Font_11x18, White);
+	  ssd1306_UpdateScreen();
+
+	  osDelay(3000);
+	  ssd1306_Fill(Black);
+
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(10);
+    sprintf(str, "%lu mm", distance);
+    ssd1306_Fill(Black);
+    ssd1306_SetCursor(0, 56);
+    ssd1306_WriteString(str, Font_6x8, White);
+
+
+    int_part = (int)battery_voltage;                      // 3
+    frac_part = (int)((battery_voltage - int_part) * 10); // 1
+
+    if (frac_part < 0) frac_part = -frac_part; // handle negative decimals
+
+    sprintf(str, "%d.%d V", int_part, frac_part);
+    ssd1306_SetCursor(98, 56);
+    ssd1306_WriteString(str, Font_6x8, White);
+
+    sprintf(str, "%d", ammo_counter);
+    ssd1306_SetCursor(48, 20);
+    ssd1306_WriteString(str, Font_16x26, White);
+
+    if (no_mag_flag) {
+    	ssd1306_SetCursor(61, 56);
+    	ssd1306_WriteString("X", Font_16x26, White);
+    }
+
+
+    ssd1306_UpdateScreen();
+
+  }
+  /* USER CODE END StartDisplayTask */
 }
 
 /**

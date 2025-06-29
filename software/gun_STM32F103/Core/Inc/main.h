@@ -71,10 +71,8 @@ void Error_Handler(void);
 #define END_SW_EXTI_5_EXTI_IRQn EXTI9_5_IRQn
 #define SPD_WHL_PWM_CH1_Pin GPIO_PIN_8
 #define SPD_WHL_PWM_CH1_GPIO_Port GPIOA
-#define TRIG_MOT_PWM_CH2_Pin GPIO_PIN_9
-#define TRIG_MOT_PWM_CH2_GPIO_Port GPIOA
-#define TRIG_MOT_B_Pin GPIO_PIN_11
-#define TRIG_MOT_B_GPIO_Port GPIOA
+#define SPD_WHL_PWM_CH2_Pin GPIO_PIN_9
+#define SPD_WHL_PWM_CH2_GPIO_Port GPIOA
 #define TRIG_MOT_A_Pin GPIO_PIN_12
 #define TRIG_MOT_A_GPIO_Port GPIOA
 

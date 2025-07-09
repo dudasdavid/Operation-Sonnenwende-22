@@ -39,6 +39,7 @@ typedef StaticTask_t osStaticThreadDef_t;
 /* USER CODE BEGIN PD */
 #define RX_BUFFER_SIZE 64
 #define TX_BUFFER_SIZE 64
+#define LINE_BUFFER_SIZE 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,6 +57,7 @@ TIM_HandleTypeDef htim1;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart3_rx;
 
 /* Definitions for defaultTask */
@@ -92,13 +94,25 @@ const osThreadAttr_t displayTask_attributes = {
   .cb_size = sizeof(myTask03ControlBlock),
   .stack_mem = &myTask03Buffer[0],
   .stack_size = sizeof(myTask03Buffer),
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for commTask */
+osThreadId_t commTaskHandle;
+uint32_t myTask04Buffer[ 128 ];
+osStaticThreadDef_t myTask04ControlBlock;
+const osThreadAttr_t commTask_attributes = {
+  .name = "commTask",
+  .cb_mem = &myTask04ControlBlock,
+  .cb_size = sizeof(myTask04ControlBlock),
+  .stack_mem = &myTask04Buffer[0],
+  .stack_size = sizeof(myTask04Buffer),
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
-uint8_t rxBuffer[RX_BUFFER_SIZE];
-uint8_t txBuffer[TX_BUFFER_SIZE];
+uint8_t rxBuffer[RX_BUFFER_SIZE]; // ToF sensor comm
+uint8_t txBuffer[TX_BUFFER_SIZE]; // ToF sensor comm
 
-volatile uint16_t rxLen = 0;
+volatile uint16_t rxLen = 0; // ToF sensor comm
 
 static volatile uint32_t gpio4_reset_counter = 0;
 static volatile uint32_t gpio4_last_counter = 0;
@@ -119,12 +133,23 @@ static volatile uint32_t trigger_start_timestamp = 0;
 
 volatile bool trigger_on = false;
 volatile bool gpio4_reset_confirmed = true;
-volatile uint32_t speed_up_threshold = 1600;
+volatile uint32_t speed_up_threshold = 2000;
 
 static volatile uint32_t sequence_time = 0;
 static volatile uint32_t distance = 9999;
 static uint8_t ammo_counter = 20;
 volatile bool no_mag_flag = false;
+volatile bool was_no_mag_flag = false;
+volatile bool shot_is_happening = false;
+
+uint8_t rxCommBuffer[RX_BUFFER_SIZE];
+uint8_t txCommBuffer[TX_BUFFER_SIZE];
+uint8_t lineBuffer[LINE_BUFFER_SIZE];
+
+volatile uint16_t rxCommLen = 0;
+uint16_t lineBufferIndex = 0;
+
+uint8_t shot_counter = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -139,6 +164,7 @@ static void MX_USART3_UART_Init(void);
 void StartDefaultTask(void *argument);
 void StartTaskOne(void *argument);
 void StartDisplayTask(void *argument);
+void StartCommTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -229,6 +255,9 @@ int main(void)
 
   /* creation of displayTask */
   displayTaskHandle = osThreadNew(StartDisplayTask, NULL, &displayTask_attributes);
+
+  /* creation of commTask */
+  commTaskHandle = osThreadNew(StartCommTask, NULL, &commTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -665,6 +694,42 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		break;
 	}
 }
+
+void I2C_Reset_Bus(I2C_HandleTypeDef *hi2c) {
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    // 1. Deinit I2C peripheral
+    HAL_I2C_DeInit(hi2c);
+
+    // 2. Reconfigure PB8/PB9 as GPIO open-drain
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+
+    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    // 3. Manually clock SCL (PB8) if SDA (PB9) is stuck low
+    for (int i = 0; i < 9; i++) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+        HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+        HAL_Delay(1);
+    }
+
+    // 4. Generate a STOP condition: SDA HIGH while SCL HIGH
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET); // SDA low
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);   // SCL high
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);   // SDA high
+    HAL_Delay(1);
+
+    // 5. Re-init I2C peripheral
+    MX_I2C1_Init(); // or HAL_I2C_Init(hi2c);
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -742,12 +807,27 @@ void StartDefaultTask(void *argument)
                 *mmPtr = '\0'; // cut off at "mm"
                 distance = atoi((char*)rxBuffer); // convert number part
 
-                if (distance > 8) {
-                	ammo_counter = 0;
-                }
+                if (shot_is_happening == false){
 
-                if (distance > 30) {
-                	no_mag_flag = true;
+					if (distance > 20) {
+						ammo_counter = 0;
+						shot_counter = 0;
+					}
+					else {
+						if (was_no_mag_flag){
+							ammo_counter = 20;
+							was_no_mag_flag = false;
+						}
+					}
+
+					if (distance > 50) {
+						no_mag_flag = true;
+						was_no_mag_flag = true;
+					}
+					else {
+						no_mag_flag = false;
+					}
+
                 }
 
 
@@ -792,7 +872,9 @@ void StartTaskOne(void *argument)
 		}
 	}
 	*/
-	if (trigger_on == true){
+	if ((trigger_on == true || shot_counter > 0) && ammo_counter > 0){
+
+		shot_is_happening = true;
 
 		TIM1->CCR1 = 80*3600/100;
 		TIM1->CCR2 = 0*3600/100;
@@ -804,12 +886,26 @@ void StartTaskOne(void *argument)
 			TIM1->CCR4 = 0*3600/100;
 			TIM1->CCR3 = 100*3600/100;
 			osDelay(500);
+			ammo_counter--;
+			shot_counter--;
+
+			if (ammo_counter == 0) {
+				shot_counter = 0;
+			}
+
+			if (ammo_counter == 0 || (shot_counter == 0 && gpio4_reset_confirmed == true)) {
+				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+				TIM1->CCR1 = 100*3600/100;
+				TIM1->CCR2 = 100*3600/100;
+			}
+
 			TIM1->CCR4 = 80*3600/100;
 			TIM1->CCR3 = 0*3600/100;
 			osDelay(300);
 			TIM1->CCR3 = 100*3600/100;
 			TIM1->CCR4 = 100*3600/100;
 			osDelay(500);
+			shot_is_happening = false;
 		}
 
 		/*
@@ -839,7 +935,7 @@ void StartTaskOne(void *argument)
 	}
 	else {
 		sequence_time = 0;
-		if (gpio4_reset_confirmed == true) {
+		if (ammo_counter == 0 || (shot_counter == 0 && gpio4_reset_confirmed == true)) {
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 			TIM1->CCR1 = 100*3600/100;
 			TIM1->CCR2 = 100*3600/100;
@@ -876,6 +972,8 @@ void StartDisplayTask(void *argument)
 	  osDelay(3000);
 	  ssd1306_Fill(Black);
 
+	  int blinking_counter = 0;
+
   /* Infinite loop */
   for(;;)
   {
@@ -895,13 +993,19 @@ void StartDisplayTask(void *argument)
     ssd1306_SetCursor(98, 56);
     ssd1306_WriteString(str, Font_6x8, White);
 
-    sprintf(str, "%d", ammo_counter);
-    ssd1306_SetCursor(48, 20);
-    ssd1306_WriteString(str, Font_16x26, White);
-
-    if (no_mag_flag) {
-    	ssd1306_SetCursor(61, 56);
-    	ssd1306_WriteString("X", Font_16x26, White);
+    if (no_mag_flag){
+    	blinking_counter++;
+    }
+    else {
+    	blinking_counter = 0;
+    }
+    if (blinking_counter < 3){
+        sprintf(str, "%d", ammo_counter);
+        ssd1306_SetCursor(48, 20);
+        ssd1306_WriteString(str, Font_16x26, White);
+    }
+    if (blinking_counter > 6) {
+    	blinking_counter = 0;
     }
 
 
@@ -909,6 +1013,76 @@ void StartDisplayTask(void *argument)
 
   }
   /* USER CODE END StartDisplayTask */
+}
+
+/* USER CODE BEGIN Header_StartCommTask */
+/**
+* @brief Function implementing the commTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartCommTask */
+void StartCommTask(void *argument)
+{
+  /* USER CODE BEGIN StartCommTask */
+	  /* Infinite loop */
+	  for(;;)
+	  {
+	      // Wait for notification from ISR
+	      ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+	      // rxCommBuffer[0..rxCommLen] ends with \n, safe to process
+	      //memcpy(lineBuffer, rxCommBuffer, rxCommLen);
+	      lineBuffer[lineBufferIndex] = '\0'; // Null-terminate
+	      lineBufferIndex = 0;
+
+
+		  // Build response
+		  // Check for prefix "PWD:"
+		  if (strncmp((char*)lineBuffer, "AMMO", 4) == 0)
+		  {
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "AMMO:%d\r\n", ammo_counter);
+
+		  }
+
+		  else if (strncmp((char*)lineBuffer, "DIST", 4) == 0)
+		  {
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "DIST:%d\r\n", distance);
+		  }
+		  else if (strncmp((char*)lineBuffer, "RSTD", 4) == 0)
+		  {
+			  I2C_Reset_Bus(&hi2c1);
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "RESET DISPLAY\r\n");
+		  }
+		  else if (strncmp((char*)lineBuffer, "SHOT:", 5) == 0)
+		  {
+              char ch = lineBuffer[5];
+
+              // Check if it's a digit between '1' and '9'
+              if (ch >= '1' && ch <= '9')
+              {
+                  shot_counter = ch - '0';
+
+                  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "SHOT:%d\r\n", shot_counter);
+
+                  gpio4_timestamp = HAL_GetTick();
+              }
+              else
+              {
+            	  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "SHOT ERROR:%.50s\r\n", lineBuffer);
+              }
+
+		  }
+		  else
+		  {
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "ERR:%.50s\r\n", lineBuffer);
+		  }
+
+		  // Send response
+		  HAL_UART_Transmit(&huart1, txCommBuffer, strlen((char*)txCommBuffer), HAL_MAX_DELAY);
+
+	  }
+  /* USER CODE END StartCommTask */
 }
 
 /**

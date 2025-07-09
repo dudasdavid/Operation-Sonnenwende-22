@@ -34,6 +34,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define RX_BUFFER_SIZE 64
+#define LINE_BUFFER_SIZE 64
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,6 +45,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
+
 
 /* USER CODE END PV */
 
@@ -58,7 +61,9 @@
 
 /* External variables --------------------------------------------------------*/
 extern DMA_HandleTypeDef hdma_adc1;
+extern DMA_HandleTypeDef hdma_usart1_rx;
 extern DMA_HandleTypeDef hdma_usart3_rx;
+extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim4;
 
@@ -66,6 +71,11 @@ extern TIM_HandleTypeDef htim4;
 extern TaskHandle_t defaultTaskHandle;
 extern volatile uint16_t rxLen;
 extern uint8_t rxBuffer[RX_BUFFER_SIZE];
+extern TaskHandle_t commTaskHandle;
+extern volatile uint16_t rxCommLen;
+extern uint8_t rxCommBuffer[RX_BUFFER_SIZE];
+extern uint8_t lineBuffer[LINE_BUFFER_SIZE];
+extern uint16_t lineBufferIndex;
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -209,6 +219,20 @@ void DMA1_Channel3_IRQHandler(void)
 }
 
 /**
+  * @brief This function handles DMA1 channel5 global interrupt.
+  */
+void DMA1_Channel5_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Channel5_IRQn 0 */
+
+  /* USER CODE END DMA1_Channel5_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart1_rx);
+  /* USER CODE BEGIN DMA1_Channel5_IRQn 1 */
+
+  /* USER CODE END DMA1_Channel5_IRQn 1 */
+}
+
+/**
   * @brief This function handles EXTI line[9:5] interrupts.
   */
 void EXTI9_5_IRQHandler(void)
@@ -236,6 +260,52 @@ void TIM4_IRQHandler(void)
   /* USER CODE BEGIN TIM4_IRQn 1 */
 
   /* USER CODE END TIM4_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART1 global interrupt.
+  */
+void USART1_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART1_IRQn 0 */
+    // Check for IDLE line interrupt
+    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE))
+    {
+        __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+
+        // Stop DMA to get received byte count
+        HAL_UART_DMAStop(&huart1);
+        rxCommLen = RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
+
+        if (rxCommLen > 0)
+        {
+            uint8_t lastByte = rxCommBuffer[rxCommLen - 1];
+
+            if (lastByte == '\r')
+            {
+                // Line complete, notify task
+                BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+                vTaskNotifyGiveFromISR(commTaskHandle, &xHigherPriorityTaskWoken);
+                portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+                // Optionally: reset your accumulation buffer here if needed
+            }
+            else
+            {
+                // Not a full line yet — accumulate
+                // Append rxCommBuffer[0..rxCommLen] to your line assembly buffer here
+                appendToLineBuffer(rxCommBuffer, rxCommLen);
+            }
+        }
+
+        // Restart DMA reception
+        HAL_UART_Receive_DMA(&huart1, rxCommBuffer, RX_BUFFER_SIZE);
+    }
+  /* USER CODE END USART1_IRQn 0 */
+  HAL_UART_IRQHandler(&huart1);
+  /* USER CODE BEGIN USART1_IRQn 1 */
+
+  /* USER CODE END USART1_IRQn 1 */
 }
 
 /**
@@ -271,5 +341,20 @@ void USART3_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+void appendToLineBuffer(uint8_t *data, uint16_t len)
+{
+    // Append safely into your app-level line buffer
+    for (uint16_t i = 0; i < len; i++)
+    {
+        if (lineBufferIndex < LINE_BUFFER_SIZE - 1)
+        {
+            lineBuffer[lineBufferIndex++] = data[i];
+        }
+        else
+        {
+            // Overflow protection — optionally reset
+            lineBufferIndex = 0;
+        }
+    }
+}
 /* USER CODE END 1 */

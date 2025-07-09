@@ -254,6 +254,74 @@ char ssd1306_WriteChar(char ch, SSD1306_Font_t Font, SSD1306_COLOR color) {
     return ch;
 }
 
+char ssd1306_WriteBigChar(char ch, const uint16_t* font_TL, const uint16_t* font_TR,
+                          const uint16_t* font_BL, const uint16_t* font_BR,
+                          SSD1306_COLOR color, uint16_t rotation)
+{
+    if (ch < '0' || ch > '9') return 0;
+
+    const uint8_t quad_width = 26;
+    const uint8_t quad_height = 24;
+
+    const uint16_t* quadrants[4] = {
+        font_TL + (ch - '0') * quad_width * 2,
+        font_TR + (ch - '0') * quad_width * 2,
+        font_BL + (ch - '0') * quad_width * 2,
+        font_BR + (ch - '0') * quad_width * 2
+    };
+
+    int x, y;
+    for (int q = 0; q < 4; q++) {
+        uint8_t base_x = (q % 2) * quad_width;
+        uint8_t base_y = (q / 2) * quad_height;
+        const uint16_t* data = quadrants[q];
+
+        for (uint8_t col = 0; col < quad_width; col++) {
+            for (uint8_t row = 0; row < quad_height; row++) {
+                uint16_t word = data[col * 2 + row / 16];
+                uint8_t pixel = (word >> (15 - (row % 16))) & 0x01;
+
+                uint8_t src_x = base_x + col;
+                uint8_t src_y = base_y + row;
+                uint8_t tx = 0, ty = 0;
+
+                // Rotation transformation
+                switch (rotation) {
+                    case 0:
+                        tx = SSD1306.CurrentX + src_x;
+                        ty = SSD1306.CurrentY + src_y;
+                        break;
+                    case 90:
+                        tx = SSD1306.CurrentX + src_y;
+                        ty = SSD1306.CurrentY + (51 - src_x);
+                        break;
+                    case 180:
+                        tx = SSD1306.CurrentX + (51 - src_x);
+                        ty = SSD1306.CurrentY + (47 - src_y);
+                        break;
+                    case 270:
+                        tx = SSD1306.CurrentX + (47 - src_y);
+                        ty = SSD1306.CurrentY + src_x;
+                        break;
+                    default:
+                        tx = SSD1306.CurrentX + src_x;
+                        ty = SSD1306.CurrentY + src_y;
+                        break;
+                }
+
+                ssd1306_DrawPixel(tx, ty, pixel ? color : (SSD1306_COLOR)!color);
+            }
+        }
+    }
+
+    if (rotation == 0 || rotation == 180)
+        SSD1306.CurrentX += quad_width * 2;
+    else
+        SSD1306.CurrentY += quad_height * 2;
+
+    return ch;
+}
+
 /* Write full string to screenbuffer */
 char ssd1306_WriteString(char* str, SSD1306_Font_t Font, SSD1306_COLOR color) {
     while (*str) {

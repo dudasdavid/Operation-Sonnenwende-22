@@ -196,6 +196,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_DMA(&huart3, rxBuffer, RX_BUFFER_SIZE);
   __HAL_UART_ENABLE_IT(&huart3, UART_IT_IDLE);
+
+  HAL_UART_Receive_DMA(&huart1, rxCommBuffer, RX_BUFFER_SIZE);
+  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -387,7 +390,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.ClockSpeed = 40000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -498,7 +501,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 9600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -564,6 +567,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 

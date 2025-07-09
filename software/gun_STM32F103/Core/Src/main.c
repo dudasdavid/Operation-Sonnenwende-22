@@ -419,7 +419,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 40000;
+  hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -999,13 +999,13 @@ void StartDisplayTask(void *argument)
     else {
     	blinking_counter = 0;
     }
-    if (blinking_counter < 3){
+    if (blinking_counter < 10){
         sprintf(str, "%02d", ammo_counter);
         //sprintf(str, "%d %d", ammo_counter / 10, ammo_counter % 10); // not nice with a space
         ssd1306_SetCursor(48, 20);
         ssd1306_WriteString(str, Font_16x26, White);
     }
-    if (blinking_counter > 6) {
+    if (blinking_counter > 15) {
     	blinking_counter = 0;
     }
 

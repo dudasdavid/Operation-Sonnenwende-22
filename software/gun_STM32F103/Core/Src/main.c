@@ -1000,7 +1000,8 @@ void StartDisplayTask(void *argument)
     	blinking_counter = 0;
     }
     if (blinking_counter < 3){
-        sprintf(str, "%d", ammo_counter);
+        sprintf(str, "%02d", ammo_counter);
+        //sprintf(str, "%d %d", ammo_counter / 10, ammo_counter % 10); // not nice with a space
         ssd1306_SetCursor(48, 20);
         ssd1306_WriteString(str, Font_16x26, White);
     }

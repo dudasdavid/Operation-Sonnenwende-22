@@ -1049,6 +1049,10 @@ void StartCommTask(void *argument)
 		  {
 			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "DIST:%d\r\n", distance);
 		  }
+		  else if (strncmp((char*)lineBuffer, "MAG", 3) == 0)
+		  {
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "MAG:%s\r\n", no_mag_flag ? "False" : "True");
+		  }
 		  else if (strncmp((char*)lineBuffer, "RSTD", 4) == 0)
 		  {
 			  I2C_Reset_Bus(&hi2c1);

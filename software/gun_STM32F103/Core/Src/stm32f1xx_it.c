@@ -279,6 +279,10 @@ void USART1_IRQHandler(void)
 
         if (rxCommLen > 0)
         {
+
+        	// Append rxCommBuffer[0..rxCommLen] to your line assembly buffer here
+        	appendToLineBuffer(rxCommBuffer, rxCommLen);
+
             uint8_t lastByte = rxCommBuffer[rxCommLen - 1];
 
             if (lastByte == '\r')
@@ -290,12 +294,7 @@ void USART1_IRQHandler(void)
 
                 // Optionally: reset your accumulation buffer here if needed
             }
-            else
-            {
-                // Not a full line yet — accumulate
-                // Append rxCommBuffer[0..rxCommLen] to your line assembly buffer here
-                appendToLineBuffer(rxCommBuffer, rxCommLen);
-            }
+
         }
 
         // Restart DMA reception

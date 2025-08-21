@@ -1034,8 +1034,8 @@ void StartDefaultTask(void *argument)
 
 
   //Initialize speeder motor controls
-  TIM1->CCR1 = 0*3600/100;
-  TIM1->CCR2 = 0*3600/100;
+  TIM1->CCR1 = 100*3600/100;
+  TIM1->CCR2 = 100*3600/100;
 
   TIM1->CCR3 = 100*3600/100;
   TIM1->CCR4 = 100*3600/100;
@@ -1149,11 +1149,25 @@ void StartTaskOne(void *argument)
 	if ((trigger_on == true || shot_counter > 0) && ammo_counter > 0){
 
 		shot_is_happening = true;
-
-		TIM1->CCR1 = 80*3600/100;
-		TIM1->CCR2 = 0*3600/100;
-
 		sequence_time = HAL_GetTick() - gpio4_timestamp;
+
+		if ( sequence_time > 1200) {
+			TIM1->CCR1 = 100*3600/100;
+			TIM1->CCR2 = 40*3600/100;
+		}
+		else if ( sequence_time > 800) {
+			TIM1->CCR1 = 100*3600/100;
+			TIM1->CCR2 = 60*3600/100;
+		}
+		else if ( sequence_time > 400) {
+			TIM1->CCR1 = 100*3600/100;
+			TIM1->CCR2 = 80*3600/100;
+		}
+		else {
+			TIM1->CCR1 = 100*3600/100;
+			TIM1->CCR2 = 90*3600/100;
+		}
+
 
 		if ( sequence_time > speed_up_threshold) {
 			//HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);

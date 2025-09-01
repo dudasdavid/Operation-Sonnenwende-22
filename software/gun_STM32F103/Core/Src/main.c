@@ -133,7 +133,7 @@ static volatile uint32_t trigger_start_timestamp = 0;
 
 volatile bool trigger_on = false;
 volatile bool gpio4_reset_confirmed = true;
-volatile uint32_t speed_up_threshold = 2400;
+volatile uint32_t speed_up_threshold = 3500;
 
 static volatile uint32_t sequence_time = 0;
 static volatile uint32_t distance = 9999;
@@ -1133,42 +1133,37 @@ void StartTaskOne(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    //counter++;
-	/*
-	if (gpio4_counter != gpio4_last_counter) {
-		gpio4_last_counter = gpio4_counter;
-		if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == GPIO_PIN_RESET){
-			firing_sequence_start = 1;
-		}
-		else {
-			//TIM1->CCR1 = 0*3600/100;
-			__asm("NOP");
-		}
-	}
-	*/
+
 	if ((trigger_on == true || shot_counter > 0) && ammo_counter > 0){
 
 		shot_is_happening = true;
 		sequence_time = HAL_GetTick() - gpio4_timestamp;
 
-		if ( sequence_time > 1200) {
-			TIM1->CCR1 = 100*3600/100;
-			TIM1->CCR2 = 40*3600/100;
+		// note: sequence starts from else branch and goes up on the tree!
+		if ( sequence_time > 1000) {
+			TIM1->CCR1 = 95*3600/100;
+			TIM1->CCR2 = 0*3600/100;
 		}
 		else if ( sequence_time > 800) {
-			TIM1->CCR1 = 100*3600/100;
-			TIM1->CCR2 = 60*3600/100;
+			TIM1->CCR1 = 85*3600/100;
+			TIM1->CCR2 = 0*3600/100;
+		}
+		else if ( sequence_time > 600) {
+			TIM1->CCR1 = 70*3600/100;
+			TIM1->CCR2 = 0*3600/100;
 		}
 		else if ( sequence_time > 400) {
-			TIM1->CCR1 = 100*3600/100;
-			TIM1->CCR2 = 80*3600/100;
+			// then give it a kick to overcome static friction of the spinner wheels
+			TIM1->CCR1 = 50*3600/100;
+			TIM1->CCR2 = 0*3600/100;
 		}
 		else {
-			TIM1->CCR1 = 100*3600/100;
-			TIM1->CCR2 = 90*3600/100;
+			// in the first few 100 ms give time to the motor to go from dynamic braking to high Z
+			TIM1->CCR1 = 0*3600/100;
+			TIM1->CCR2 = 0*3600/100;
 		}
 
-
+		// volatile uint32_t speed_up_threshold = 3500;
 		if ( sequence_time > speed_up_threshold) {
 			//HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 			TIM1->CCR4 = 0*3600/100;
@@ -1183,6 +1178,7 @@ void StartTaskOne(void *argument)
 
 			if (ammo_counter == 0 || (shot_counter == 0 && gpio4_reset_confirmed == true)) {
 				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+				// o to dynamic breaking
 				TIM1->CCR1 = 100*3600/100;
 				TIM1->CCR2 = 100*3600/100;
 			}
@@ -1196,41 +1192,19 @@ void StartTaskOne(void *argument)
 			shot_is_happening = false;
 		}
 
-		/*
-		TIM1->CCR1 = 60*3600/100;
-		osDelay(100);
-		TIM1->CCR1 = 50*3600/100;
-		osDelay(2400);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_SET);
-		trigger_start_timestamp = HAL_GetTick();
-		TIM1->CCR2 = 100*3600/100;
-		osDelay(700);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
-		TIM1->CCR2 = 0*3600/100;
-		osDelay(300);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
-		TIM1->CCR2 = 60*3600/100;
-		osDelay(100);
-		TIM1->CCR2 = 0*3600/100;
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
-		TIM1->CCR1 = 0*3600/100;
-		*/
-		//firing_sequence_start = 0;
+
 	}
 	else {
 		sequence_time = 0;
 		if (ammo_counter == 0 || (shot_counter == 0 && gpio4_reset_confirmed == true)) {
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+			// go to dynamic breaking
 			TIM1->CCR1 = 100*3600/100;
 			TIM1->CCR2 = 100*3600/100;
 		}
 	}
 
-    osDelay(100);
+    osDelay(20);
   }
   /* USER CODE END StartTaskOne */
 }

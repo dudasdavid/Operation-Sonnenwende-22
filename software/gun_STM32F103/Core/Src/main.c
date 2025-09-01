@@ -1335,16 +1335,22 @@ void StartCommTask(void *argument)
 		  if (strncmp((char*)lineBuffer, "AMMO", 4) == 0)
 		  {
 			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "AMMO:%d\r\n", ammo_counter);
-
 		  }
-
 		  else if (strncmp((char*)lineBuffer, "DIST", 4) == 0)
 		  {
-			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "DIST:%d\r\n", distance);
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "DIST:%d\r\n", (int)distance);
 		  }
 		  else if (strncmp((char*)lineBuffer, "MAG", 3) == 0)
 		  {
 			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "MAG:%s\r\n", no_mag_flag ? "False" : "True");
+		  }
+		  else if (strncmp((char*)lineBuffer, "BAT", 3) == 0)
+		  {
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "BAT:%d\r\n", (int)(battery_voltage*10));
+		  }
+		  else if (strncmp((char*)lineBuffer, "STAT", 4) == 0)
+		  {
+			  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "STAT:%d;%d;%d;%s;END\r\n", ammo_counter, (int)distance, (int)(battery_voltage*10), no_mag_flag ? "False" : "True");
 		  }
 		  else if (strncmp((char*)lineBuffer, "RSTD", 4) == 0)
 		  {

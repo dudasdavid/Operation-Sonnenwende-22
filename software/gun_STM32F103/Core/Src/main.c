@@ -25,6 +25,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "ssd1306.h"
 #include "ssd1306_fonts.h"
 /* USER CODE END Includes */
@@ -133,11 +134,11 @@ static volatile uint32_t trigger_start_timestamp = 0;
 
 volatile bool trigger_on = false;
 volatile bool gpio4_reset_confirmed = true;
-volatile uint32_t speed_up_threshold = 3500;
+volatile uint32_t speed_up_threshold = 2000;
 
 static volatile uint32_t sequence_time = 0;
 static volatile uint32_t distance = 9999;
-static uint8_t ammo_counter = 20;
+static uint8_t ammo_counter = 12;
 volatile bool no_mag_flag = false;
 volatile bool was_no_mag_flag = false;
 volatile bool shot_is_happening = false;
@@ -1089,7 +1090,7 @@ void StartDefaultTask(void *argument)
 					}
 					else {
 						if (was_no_mag_flag){
-							ammo_counter = 20;
+							ammo_counter = 12;
 							was_no_mag_flag = false;
 						}
 					}

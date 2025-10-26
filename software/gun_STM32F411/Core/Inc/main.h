@@ -59,6 +59,14 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define FLYWHEEL_CH1_Pin GPIO_PIN_8
+#define FLYWHEEL_CH1_GPIO_Port GPIOA
+#define FLYWHEEL_CH2_Pin GPIO_PIN_9
+#define FLYWHEEL_CH2_GPIO_Port GPIOA
+#define PUSHER_CH3_Pin GPIO_PIN_10
+#define PUSHER_CH3_GPIO_Port GPIOA
+#define PUSHER_CH4_Pin GPIO_PIN_11
+#define PUSHER_CH4_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

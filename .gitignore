@@ -2,5 +2,6 @@
 *.STL
 
 software/gun_STM32F103/Debug/*
+software/gun_STM32F411/Debug/*
 
 *.DS_Store

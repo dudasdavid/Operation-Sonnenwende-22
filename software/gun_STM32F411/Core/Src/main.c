@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,9 +32,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define RX_BUFFER_SIZE 64
-#define TX_BUFFER_SIZE 64
+#define RX_BUFFER_SIZE   64
+#define TX_BUFFER_SIZE   64
 #define LINE_BUFFER_SIZE 64
+#define ADC_BUF_LEN      32 // must be even (half-buffer processing)
+#define VREF             3.3f  // VDDA if you don’t compensate with Vrefint
+#define DIV_SCALE        ((9.5f + 21.2f) / 9.5f)  // 3.2 for 10k/22k
+#define ADC_MAX          4095.0f
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +58,8 @@ TIM_HandleTypeDef htim1;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -89,10 +95,14 @@ uint8_t txBuffer[TX_BUFFER_SIZE]; // ToF sensor comm
 
 volatile uint16_t rxLen = 0; // ToF sensor comm
 
-static volatile uint32_t ADC_Buf[4];
-static volatile uint32_t ADC_Values[4];
+static volatile uint32_t adc_buf[ADC_BUF_LEN] __attribute__((aligned(4)));
 
 static volatile float battery_voltage = 0;
+
+volatile bool magazine = false;
+volatile bool trigger1 = false;
+volatile bool trigger2 = false;
+volatile bool pusher_switch = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -116,13 +126,7 @@ void StartSensorTask(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc){
 
-  if(hadc->Instance==ADC1){
-      ADC_Values[0] = ADC_Buf[0];
-      HAL_ADC_Stop_DMA(&hadc1);
-  }
-}
 /* USER CODE END 0 */
 
 /**
@@ -296,7 +300,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -307,7 +311,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -483,7 +487,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 9600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -516,7 +520,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
+  huart2.Init.BaudRate = 9600;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -541,11 +545,18 @@ static void MX_DMA_Init(void)
 
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
   /* DMA2_Stream0_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA2_Stream2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 
 }
 
@@ -570,6 +581,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, SPI1_DC_Pin|SPI1_RST_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -583,11 +600,35 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : SPI1_CS_Pin */
+  GPIO_InitStruct.Pin = SPI1_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SPI1_DC_Pin SPI1_RST_Pin */
+  GPIO_InitStruct.Pin = SPI1_DC_Pin|SPI1_RST_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /*Configure GPIO pins : PB4 PB5 PB8 PB9 */
   GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_8|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -595,7 +636,71 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	switch (GPIO_Pin) {
+	case GPIO_PIN_4:
+		if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_RESET){
+			pusher_switch = true;
+		}
+		else {
+			pusher_switch = false;
+		}
+		break;
+	case GPIO_PIN_5:
+		if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5) == GPIO_PIN_RESET){
+			magazine = true;
+		}
+		else {
+			magazine = false;
+		}
+		break;
+	case GPIO_PIN_8:
+		if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET){
+			trigger1 = true;
+		}
+		else {
+			trigger1 = false;
+		}
+		break;
+	case GPIO_PIN_9:
+		if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET){
+			trigger2 = true;
+		}
+		else {
+			trigger2 = false;
+		}
+		break;
+	}
+}
 
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc == &hadc1) {
+        process_half(0, ADC_BUF_LEN / 2);
+    }
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc == &hadc1) {
+        process_half(ADC_BUF_LEN / 2, ADC_BUF_LEN / 2);
+    }
+}
+
+static void process_half(size_t offset, size_t count)
+{
+    uint32_t sum = 0;
+
+    // If your buffer is uint32_t, the 12-bit value sits in the lower bits (right-aligned)
+    for (size_t i = 0; i < count; ++i) {
+        sum += (uint16_t)adc_buf[offset + i];
+    }
+
+    uint16_t avg_raw = (uint16_t)(sum / count);
+
+    float v_pin  = (avg_raw * VREF) / ADC_MAX;
+    battery_voltage = v_pin * DIV_SCALE;
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -629,9 +734,9 @@ void StartDefaultTask(void *argument)
   {
     osDelay(1000);
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	TIM1->CCR1 = 30*5000/100;
+	TIM1->CCR1 = 0*5000/100;
 	TIM1->CCR2 = 0*5000/100;
-	TIM1->CCR3 = 60*5000/100;
+	TIM1->CCR3 = 0*5000/100;
 	TIM1->CCR4 = 0*5000/100;
   }
   /* USER CODE END 5 */
@@ -683,12 +788,40 @@ void StartDisplayTask(void *argument)
 void StartSensorTask(void *argument)
 {
   /* USER CODE BEGIN StartSensorTask */
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
   /* Infinite loop */
   for(;;)
   {
-	  battery_voltage = ADC_Values[0] / 375.0;
-	  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)ADC_Buf,4);
-	  osDelay(1000);
+
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_RESET){
+		pusher_switch = true;
+	}
+	else {
+		pusher_switch = false;
+	}
+
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5) == GPIO_PIN_RESET){
+		magazine = true;
+	}
+	else {
+		magazine = false;
+	}
+
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET){
+		trigger1 = true;
+	}
+	else {
+		trigger1 = false;
+	}
+
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET){
+		trigger2 = true;
+	}
+	else {
+		trigger2 = false;
+	}
+
+	osDelay(10);
   }
   /* USER CODE END StartSensorTask */
 }

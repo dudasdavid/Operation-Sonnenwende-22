@@ -55,10 +55,20 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+static void process_half(size_t offset, size_t count);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define TOF_TX_Pin GPIO_PIN_2
+#define TOF_TX_GPIO_Port GPIOA
+#define TOF_RX_Pin GPIO_PIN_3
+#define TOF_RX_GPIO_Port GPIOA
+#define SPI1_CS_Pin GPIO_PIN_4
+#define SPI1_CS_GPIO_Port GPIOA
+#define SPI1_DC_Pin GPIO_PIN_0
+#define SPI1_DC_GPIO_Port GPIOB
+#define SPI1_RST_Pin GPIO_PIN_1
+#define SPI1_RST_GPIO_Port GPIOB
 #define FLYWHEEL_CH1_Pin GPIO_PIN_8
 #define FLYWHEEL_CH1_GPIO_Port GPIOA
 #define FLYWHEEL_CH2_Pin GPIO_PIN_9

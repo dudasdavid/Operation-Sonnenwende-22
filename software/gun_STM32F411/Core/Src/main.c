@@ -23,6 +23,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -103,6 +106,20 @@ volatile bool magazine = false;
 volatile bool trigger1 = false;
 volatile bool trigger2 = false;
 volatile bool pusher_switch = false;
+
+static volatile uint32_t distance = 9999;
+static uint8_t ammo_counter = 12;
+volatile bool no_mag_flag = false;
+volatile bool was_no_mag_flag = false;
+volatile bool shot_is_happening = false;
+uint8_t shot_counter = 0;
+
+uint8_t rxCommBuffer[RX_BUFFER_SIZE];
+uint8_t txCommBuffer[TX_BUFFER_SIZE];
+uint8_t lineBuffer[LINE_BUFFER_SIZE];
+volatile uint16_t rxCommLen = 0;
+uint16_t lineBufferIndex = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -752,9 +769,67 @@ void StartDefaultTask(void *argument)
 void StartCommTask(void *argument)
 {
   /* USER CODE BEGIN StartCommTask */
+  HAL_UART_Receive_DMA(&huart2, rxBuffer, RX_BUFFER_SIZE);
+  __HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE);
   /* Infinite loop */
   for(;;)
   {
+
+	// Wait for notification from ISR
+	ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+	// Process received data
+	if(rxLen > 0)
+	{
+		// Look for '\n'
+		char* newlinePos = memchr(rxBuffer, '\n', rxLen);
+		if(newlinePos)
+		{
+			size_t msgLen = newlinePos - (char*)rxBuffer;
+			if(msgLen >= RX_BUFFER_SIZE) msgLen = RX_BUFFER_SIZE - 1;
+
+			// Null-terminate
+			rxBuffer[msgLen] = '\0';
+
+			// Look for "mm" in the string
+			char *mmPtr = strstr((char*)rxBuffer, "mm");
+			if (mmPtr != NULL) {
+				*mmPtr = '\0'; // cut off at "mm"
+				distance = atoi((char*)rxBuffer); // convert number part
+
+				if (shot_is_happening == false){
+
+					if (distance > 20) {
+						ammo_counter = 0;
+						shot_counter = 0;
+					}
+					else {
+						if (was_no_mag_flag){
+							ammo_counter = 12;
+							was_no_mag_flag = false;
+						}
+					}
+
+					if (distance > 70) {
+						no_mag_flag = true;
+						was_no_mag_flag = true;
+					}
+					else {
+						no_mag_flag = false;
+					}
+
+				}
+
+
+			} else {
+				distance = 9999;
+			}
+		}
+	}
+
+	// Reset buffer length
+	rxLen = 0;
+
     osDelay(1);
   }
   /* USER CODE END StartCommTask */

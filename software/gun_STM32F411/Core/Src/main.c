@@ -26,6 +26,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "GC9A01.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,6 +57,7 @@ DMA_HandleTypeDef hdma_adc1;
 I2C_HandleTypeDef hi2c1;
 
 SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 TIM_HandleTypeDef htim1;
 
@@ -92,6 +94,20 @@ const osThreadAttr_t sensorTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for hostRxTask */
+osThreadId_t hostRxTaskHandle;
+const osThreadAttr_t hostRxTask_attributes = {
+  .name = "hostRxTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for hostTxTask */
+osThreadId_t hostTxTaskHandle;
+const osThreadAttr_t hostTxTask_attributes = {
+  .name = "hostTxTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 uint8_t rxBuffer[RX_BUFFER_SIZE]; // ToF sensor comm
 uint8_t txBuffer[TX_BUFFER_SIZE]; // ToF sensor comm
@@ -106,6 +122,9 @@ volatile bool magazine = false;
 volatile bool trigger1 = false;
 volatile bool trigger2 = false;
 volatile bool pusher_switch = false;
+volatile bool trigger2_latched = false;
+volatile bool need_false = false;
+volatile bool armed = false;
 
 static volatile uint32_t distance = 9999;
 static uint8_t ammo_counter = 12;
@@ -120,6 +139,11 @@ uint8_t lineBuffer[LINE_BUFFER_SIZE];
 volatile uint16_t rxCommLen = 0;
 uint16_t lineBufferIndex = 0;
 
+static volatile uint32_t shot_timestamp = 0;
+volatile uint32_t speed_up_threshold = 2000;
+volatile uint32_t shooting_cooldown = 1500;
+static volatile uint32_t sequence_time = 0;
+static volatile uint32_t last_shot = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -136,6 +160,8 @@ void StartDefaultTask(void *argument);
 void StartCommTask(void *argument);
 void StartDisplayTask(void *argument);
 void StartSensorTask(void *argument);
+void StartHostRxTask(void *argument);
+void StartHostTxTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -217,6 +243,12 @@ int main(void)
 
   /* creation of sensorTask */
   sensorTaskHandle = osThreadNew(StartSensorTask, NULL, &sensorTask_attributes);
+
+  /* creation of hostRxTask */
+  hostRxTaskHandle = osThreadNew(StartHostRxTask, NULL, &hostRxTask_attributes);
+
+  /* creation of hostTxTask */
+  hostTxTaskHandle = osThreadNew(StartHostTxTask, NULL, &hostTxTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -396,7 +428,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -574,6 +606,9 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
+  /* DMA2_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
 
 }
 
@@ -740,21 +775,110 @@ void StartDefaultTask(void *argument)
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_4);
 
   //Initialize speeder motor controls
-  TIM1->CCR1 = 100*5000/100;
-  TIM1->CCR2 = 100*5000/100;
+  TIM1->CCR1 = 0*5000/100;
+  TIM1->CCR2 = 0*5000/100;
 
-  TIM1->CCR3 = 100*5000/100;
-  TIM1->CCR4 = 100*5000/100;
+  TIM1->CCR3 = 0*5000/100;
+  TIM1->CCR4 = 0*5000/100;
+
+  uint16_t i = 0;
+  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1000);
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	TIM1->CCR1 = 0*5000/100;
-	TIM1->CCR2 = 0*5000/100;
-	TIM1->CCR3 = 0*5000/100;
-	TIM1->CCR4 = 0*5000/100;
+
+
+	if (trigger1 && trigger2) {
+		shot_counter = 1;
+	}
+
+	// automatic control
+	if (shot_counter > 0 && ammo_counter > 0){
+		shot_is_happening = true;
+		sequence_time = HAL_GetTick() - shot_timestamp;
+
+		// note: sequence starts from else branch and goes up on the tree!
+		if ( sequence_time > 700) {
+			TIM1->CCR1 = 90*5000/100;
+			TIM1->CCR2 = 0*5000/100;
+		}
+		else if ( sequence_time > 500) {
+			TIM1->CCR1 = 87*5000/100;
+			TIM1->CCR2 = 0*5000/100;
+		}
+		else if ( sequence_time > 400) {
+			TIM1->CCR1 = 85*5000/100;
+			TIM1->CCR2 = 0*5000/100;
+		}
+		else if ( sequence_time > 200) {
+			// then give it a kick to overcome static friction of the spinner wheels
+			TIM1->CCR1 = 80*5000/100;
+			TIM1->CCR2 = 0*5000/100;
+		}
+		else {
+			// in the first few 100 ms give time to the motor to go from dynamic braking to high Z
+			TIM1->CCR1 = 0*5000/100;
+			TIM1->CCR2 = 0*5000/100;
+		}
+
+		// volatile uint32_t speed_up_threshold = 3500;
+		if ( sequence_time > speed_up_threshold) {
+			//HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+			if (HAL_GetTick() - last_shot > shooting_cooldown) {
+				TIM1->CCR3 = 70*5000/100;
+				TIM1->CCR4 = 0*5000/100;
+			}
+			else {
+				TIM1->CCR3 = 0*5000/100;
+				TIM1->CCR4 = 0*5000/100;
+			}
+
+			if (pusher_switch == false) {
+				armed = true;
+			}
+
+			if (armed && pusher_switch) {
+				ammo_counter--;
+				shot_counter--;
+				armed=false;
+				last_shot = HAL_GetTick();
+			}
+
+
+			if (ammo_counter == 0) {
+				shot_counter = 0;
+			}
+
+			if (ammo_counter == 0 || shot_counter == 0) {
+				// go to dynamic breaking
+				TIM1->CCR1 = 100*5000/100;
+				TIM1->CCR2 = 100*5000/100;
+				shot_is_happening = false;
+			}
+
+		}
+
+	}
+	else {
+		TIM1->CCR1 = 100*5000/100;
+		TIM1->CCR2 = 100*5000/100;
+		TIM1->CCR3 = 0*5000/100;
+		TIM1->CCR4 = 0*5000/100;
+		shot_is_happening = false;
+	}
+
+    osDelay(1);
+
+    i++;
+    if ((i == 300) || (i == 500) || (i == 800) || (i == 1000)){
+	    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    }
+    if (i==1500) {
+	    i = 0;
+    }
+
+
   }
   /* USER CODE END 5 */
 }
@@ -800,8 +924,8 @@ void StartCommTask(void *argument)
 				if (shot_is_happening == false){
 
 					if (distance > 20) {
-						ammo_counter = 0;
-						shot_counter = 0;
+						//ammo_counter = 0;
+						//shot_counter = 0;
 					}
 					else {
 						if (was_no_mag_flag){
@@ -845,10 +969,34 @@ void StartCommTask(void *argument)
 void StartDisplayTask(void *argument)
 {
   /* USER CODE BEGIN StartDisplayTask */
+	GC9A01_Init();
+
+	GC9A01_FillRect(50,50,50,50,0xFFFF);
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+      //gc9a01_fill_screen(GC9A01_BLUE);
+      //gc9a01_draw_hline(10, 10, 220, GC9A01_WHITE);
+      //gc9a01_draw_vline(10, 10, 220, GC9A01_WHITE);
+      //gc9a01_draw_pixel(120, 120, GC9A01_RED);
+
+      // Draw a gradient block using streaming API
+      /*
+      uint16_t w = 100, h = 100; uint16_t x=70, y=70;
+      gc9a01_start_write_window(x,y,w,h);
+      for (uint32_t j=0;j<h;j++) {
+          for (uint32_t i=0;i<w;i++) {
+              uint8_t r = (i*255)/w;
+              uint8_t g = (j*255)/h;
+              uint8_t b = 128;
+              uint16_t c = GC9A01_COLOR(r,g,b);
+              gc9a01_write_color_repeat(c, 1);
+          }
+      }
+      */
+      //gc9a01_end_write();
+    osDelay(1000);
   }
   /* USER CODE END StartDisplayTask */
 }
@@ -891,14 +1039,114 @@ void StartSensorTask(void *argument)
 
 	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET){
 		trigger2 = true;
+		if (need_false) {
+			trigger2_latched = true;
+		}
+
 	}
 	else {
 		trigger2 = false;
+		need_false = true;
 	}
 
 	osDelay(10);
   }
   /* USER CODE END StartSensorTask */
+}
+
+/* USER CODE BEGIN Header_StartHostRxTask */
+/**
+* @brief Function implementing the hostRxTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartHostRxTask */
+void StartHostRxTask(void *argument)
+{
+  /* USER CODE BEGIN StartHostRxTask */
+  HAL_UART_Receive_DMA(&huart1, rxBuffer, RX_BUFFER_SIZE);
+  __HAL_UART_ENABLE_IT(&huart1, UART_IT_IDLE);
+  /* Infinite loop */
+  for(;;)
+  {
+      // Wait for notification from ISR
+      ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+      // rxCommBuffer[0..rxCommLen] ends with \n, safe to process
+      //memcpy(lineBuffer, rxCommBuffer, rxCommLen);
+      lineBuffer[lineBufferIndex] = '\0'; // Null-terminate
+      lineBufferIndex = 0;
+
+
+	  // Build response
+	  // Check for prefix "PWD:"
+	  if (strncmp((char*)lineBuffer, "AMMO", 4) == 0)
+	  {
+		  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "AMMO:%d\r\n", ammo_counter);
+	  }
+	  else if (strncmp((char*)lineBuffer, "DIST", 4) == 0)
+	  {
+		  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "DIST:%d\r\n", (int)distance);
+	  }
+	  else if (strncmp((char*)lineBuffer, "MAG", 3) == 0)
+	  {
+		  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "MAG:%s\r\n", no_mag_flag ? "False" : "True");
+	  }
+	  else if (strncmp((char*)lineBuffer, "BAT", 3) == 0)
+	  {
+		  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "BAT:%d\r\n", (int)(battery_voltage*10));
+	  }
+	  else if (strncmp((char*)lineBuffer, "STAT", 4) == 0)
+	  {
+		  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "STAT:%d;%d;%d;%s;END\r\n", ammo_counter, (int)distance, (int)(battery_voltage*10), no_mag_flag ? "False" : "True");
+	  }
+	  else if (strncmp((char*)lineBuffer, "SHOT:", 5) == 0)
+	  {
+          char ch = lineBuffer[5];
+
+          // Check if it's a digit between '1' and '9'
+          if (ch >= '1' && ch <= '9')
+          {
+              shot_counter = ch - '0';
+
+              snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "SHOT:%d\r\n", shot_counter);
+
+              shot_timestamp = HAL_GetTick();
+          }
+          else
+          {
+        	  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "SHOT ERROR:%.50s\r\n", lineBuffer);
+          }
+
+	  }
+	  else
+	  {
+		  snprintf((char*)txCommBuffer, TX_BUFFER_SIZE, "ERR:%.50s\r\n", lineBuffer);
+	  }
+
+	  // Send response
+	  HAL_UART_Transmit(&huart1, txCommBuffer, strlen((char*)txCommBuffer), HAL_MAX_DELAY);
+	  osDelay(1);
+  }
+  /* USER CODE END StartHostRxTask */
+}
+
+/* USER CODE BEGIN Header_StartHostTxTask */
+/**
+* @brief Function implementing the hostTxTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartHostTxTask */
+void StartHostTxTask(void *argument)
+{
+  /* USER CODE BEGIN StartHostTxTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartHostTxTask */
 }
 
 /**

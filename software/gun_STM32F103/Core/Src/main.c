@@ -134,7 +134,7 @@ static volatile uint32_t trigger_start_timestamp = 0;
 
 volatile bool trigger_on = false;
 volatile bool gpio4_reset_confirmed = true;
-volatile uint32_t speed_up_threshold = 2000;
+volatile uint32_t speed_up_threshold = 2500;
 
 static volatile uint32_t sequence_time = 0;
 static volatile uint32_t distance = 9999;
@@ -1141,19 +1141,19 @@ void StartTaskOne(void *argument)
 		sequence_time = HAL_GetTick() - gpio4_timestamp;
 
 		// note: sequence starts from else branch and goes up on the tree!
-		if ( sequence_time > 1000) {
+		if ( sequence_time > 700) {
 			TIM1->CCR1 = 95*3600/100;
 			TIM1->CCR2 = 0*3600/100;
 		}
-		else if ( sequence_time > 800) {
+		else if ( sequence_time > 500) {
 			TIM1->CCR1 = 85*3600/100;
 			TIM1->CCR2 = 0*3600/100;
 		}
-		else if ( sequence_time > 600) {
+		else if ( sequence_time > 400) {
 			TIM1->CCR1 = 70*3600/100;
 			TIM1->CCR2 = 0*3600/100;
 		}
-		else if ( sequence_time > 400) {
+		else if ( sequence_time > 200) {
 			// then give it a kick to overcome static friction of the spinner wheels
 			TIM1->CCR1 = 50*3600/100;
 			TIM1->CCR2 = 0*3600/100;

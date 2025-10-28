@@ -55,7 +55,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+static void process_half(size_t offset, size_t count);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

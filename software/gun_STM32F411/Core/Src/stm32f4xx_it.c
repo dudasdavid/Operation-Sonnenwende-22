@@ -59,6 +59,7 @@
 
 /* External variables --------------------------------------------------------*/
 extern DMA_HandleTypeDef hdma_adc1;
+extern DMA_HandleTypeDef hdma_spi1_tx;
 extern TIM_HandleTypeDef htim1;
 extern DMA_HandleTypeDef hdma_usart1_rx;
 extern DMA_HandleTypeDef hdma_usart2_rx;
@@ -71,6 +72,7 @@ extern TaskHandle_t commTaskHandle;
 extern volatile uint16_t rxLen;
 extern uint8_t rxBuffer[RX_BUFFER_SIZE];
 
+extern TaskHandle_t hostRxTaskHandle;
 extern volatile uint16_t rxCommLen;
 extern uint8_t rxCommBuffer[RX_BUFFER_SIZE];
 extern uint8_t lineBuffer[LINE_BUFFER_SIZE];
@@ -255,7 +257,38 @@ void TIM1_TRG_COM_TIM11_IRQHandler(void)
 void USART1_IRQHandler(void)
 {
   /* USER CODE BEGIN USART1_IRQn 0 */
+	// Check for IDLE line interrupt
+	if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE))
+	{
+		__HAL_UART_CLEAR_IDLEFLAG(&huart1);
 
+		// Stop DMA to get received byte count
+		HAL_UART_DMAStop(&huart1);
+		rxCommLen = RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(&hdma_usart1_rx);
+
+		if (rxCommLen > 0)
+		{
+
+			// Append rxCommBuffer[0..rxCommLen] to your line assembly buffer here
+			appendToLineBuffer(rxCommBuffer, rxCommLen);
+
+			uint8_t lastByte = rxCommBuffer[rxCommLen - 1];
+
+			if (lastByte == '\r')
+			{
+				// Line complete, notify task
+				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+				vTaskNotifyGiveFromISR(hostRxTaskHandle, &xHigherPriorityTaskWoken);
+				portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+				// Optionally: reset your accumulation buffer here if needed
+			}
+
+		}
+
+		// Restart DMA reception
+		HAL_UART_Receive_DMA(&huart1, rxCommBuffer, RX_BUFFER_SIZE);
+	}
   /* USER CODE END USART1_IRQn 0 */
   HAL_UART_IRQHandler(&huart1);
   /* USER CODE BEGIN USART1_IRQn 1 */
@@ -321,6 +354,20 @@ void DMA2_Stream2_IRQHandler(void)
   /* USER CODE BEGIN DMA2_Stream2_IRQn 1 */
 
   /* USER CODE END DMA2_Stream2_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream3 global interrupt.
+  */
+void DMA2_Stream3_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream3_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream3_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_spi1_tx);
+  /* USER CODE BEGIN DMA2_Stream3_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream3_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
